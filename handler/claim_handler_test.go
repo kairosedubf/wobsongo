@@ -110,7 +110,7 @@ func TestCheckClaimHandler_Success(t *testing.T) {
 	analyzer := &stubAnalyzer{
 		analysis: &data.ClaimAnalysis{
 			InScope:   true,
-			SubClaims: []string{"vitamin C prevents colds"},
+			SubClaims: []data.SubClaim{{Text: "vitamin C prevents colds"}},
 		},
 	}
 	judge := &stubJudge{
@@ -209,7 +209,7 @@ func TestCheckClaimHandler_Success_LongMode(t *testing.T) {
 	analyzer := &stubAnalyzer{
 		analysis: &data.ClaimAnalysis{
 			InScope:   true,
-			SubClaims: []string{"vitamin C prevents colds"},
+			SubClaims: []data.SubClaim{{Text: "vitamin C prevents colds"}},
 		},
 	}
 	judge := &stubJudge{

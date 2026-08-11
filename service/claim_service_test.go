@@ -88,6 +88,50 @@ func newEmptyRAGService() *RAGService {
 	return NewRAGService(chunkRepo, knowledgeRepo, &stubEmbedder{vector: []float32{1}})
 }
 
+// ragServiceWithAnyHit returns a RAGService whose full-text chunk search
+// returns one hit for any query — for tests that need the judge to actually
+// be called (as opposed to newEmptyRAGService's always-zero-hits shortcut).
+func ragServiceWithAnyHit() *RAGService {
+	chunkRepo := &mockrepo.DocumentChunkRepoerMock{}
+	chunkRepo.SearchByEmbeddingFunc = func(
+		context.Context, []float32, int,
+	) ([]data.ScoredResult[model.DocumentChunk], error) {
+		return nil, nil
+	}
+	chunkRepo.SearchByFullTextFunc = func(
+		context.Context, string, int,
+	) ([]data.ScoredResult[model.DocumentChunk], error) {
+		return []data.ScoredResult[model.DocumentChunk]{
+			{
+				Item: model.DocumentChunk{
+					ID:          uuid.New(),
+					ParsedChunk: model.ParsedChunk{Text: "some evidence"},
+				},
+				Score: 0.9,
+			},
+		}, nil
+	}
+
+	knowledgeRepo := &mockrepo.AtomicKnowledgeRepoerMock{}
+	knowledgeRepo.SearchByEmbeddingFunc = func(
+		context.Context, []float32, int,
+	) ([]data.ScoredResult[model.AtomicKnowledge], error) {
+		return nil, nil
+	}
+	knowledgeRepo.SearchByFullTextFunc = func(
+		context.Context, string, int,
+	) ([]data.ScoredResult[model.AtomicKnowledge], error) {
+		return nil, nil
+	}
+	knowledgeRepo.SearchBySimilarityFunc = func(
+		context.Context, string, int,
+	) ([]data.ScoredResult[model.AtomicKnowledge], error) {
+		return nil, nil
+	}
+
+	return NewRAGService(chunkRepo, knowledgeRepo, &stubEmbedder{vector: []float32{1}})
+}
+
 func TestClaimService_CheckClaim_OutOfScopeShortCircuitsBeforeRetrieval(t *testing.T) {
 	analyzer := &stubClaimAnalyzer{
 		analysis: &data.ClaimAnalysis{InScope: false, RefusalReason: "not health-related"},
@@ -125,7 +169,7 @@ func TestClaimService_CheckClaim_ZeroEvidenceNeverReachesJudge(t *testing.T) {
 	analyzer := &stubClaimAnalyzer{
 		analysis: &data.ClaimAnalysis{
 			InScope:   true,
-			SubClaims: []string{"an obscure unverifiable claim"},
+			SubClaims: []data.SubClaim{{Text: "an obscure unverifiable claim"}},
 		},
 	}
 	judge := &stubClaimJudge{
@@ -154,6 +198,14 @@ func TestClaimService_CheckClaim_ZeroEvidenceNeverReachesJudge(t *testing.T) {
 	}
 	if judge.callCount() != 0 {
 		t.Errorf("expected judge never called, got %d calls", judge.callCount())
+	}
+	wantExplainer := insufficientEvidenceExplainerTemplates[model.LanguageFrench]
+	if !strings.Contains(result.FormattedMessage, wantExplainer) {
+		t.Errorf(
+			"expected FormattedMessage to contain health-expert referral %q, got %q",
+			wantExplainer,
+			result.FormattedMessage,
+		)
 	}
 }
 
@@ -229,7 +281,10 @@ func TestClaimService_CheckClaim_MultipleSubClaimsJudgedConcurrentlyAndAggregate
 	rag := NewRAGService(chunkRepo, knowledgeRepo, &stubEmbedder{vector: []float32{1}})
 
 	analyzer := &stubClaimAnalyzer{
-		analysis: &data.ClaimAnalysis{InScope: true, SubClaims: []string{"claim A", "claim B"}},
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: "claim A"}, {Text: "claim B"}},
+		},
 	}
 	judge := &stubClaimJudge{
 		judgeFunc: func(req *data.JudgeRequest) (*data.JudgeVerdict, error) {
@@ -272,14 +327,14 @@ func TestClaimService_CheckClaim_MultipleSubClaimsJudgedConcurrentlyAndAggregate
 		result.SubClaims[1].Verdict != model.VerdictContradicted {
 		t.Errorf("expected sub-claim 1 = claim B/Contradicted, got %+v", result.SubClaims[1])
 	}
-	if result.OverallSummary != "contains inaccuracies" {
+	if result.OverallSummary != "contient des inexactitudes" {
 		t.Errorf(
 			"expected overall summary to reflect the contradiction, got %q",
 			result.OverallSummary,
 		)
 	}
 
-	wantMessage := "❌ contains inaccuracies — 2 claims checked\n\n" +
+	wantMessage := "❌ contient des inexactitudes — 2 affirmations vérifiées\n\n" +
 		"✅ 1. claim A\n\n" +
 		"❌ 2. claim B"
 	if result.FormattedMessage != wantMessage {
@@ -331,7 +386,7 @@ func TestClaimService_CheckClaim_IsLongControlsFormattedMessageVerbosity(t *test
 
 	rag := NewRAGService(chunkRepo, knowledgeRepo, &stubEmbedder{vector: []float32{1}})
 	analyzer := &stubClaimAnalyzer{
-		analysis: &data.ClaimAnalysis{InScope: true, SubClaims: []string{"claim A"}},
+		analysis: &data.ClaimAnalysis{InScope: true, SubClaims: []data.SubClaim{{Text: "claim A"}}},
 	}
 	judge := &stubClaimJudge{
 		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
@@ -425,5 +480,318 @@ func TestClaimService_CheckClaim_OutOfScopeHasNoFormattedMessage(t *testing.T) {
 			"expected no formatted message for out-of-scope input, got %q",
 			result.FormattedMessage,
 		)
+	}
+}
+
+// assertHighRiskOverrideApplied is shared by the high-risk override tests
+// below (response-rule.txt section 4's "whatever else is true" guarantee).
+func assertHighRiskOverrideApplied(t *testing.T, sc SubClaimResult) {
+	t.Helper()
+	if sc.Verdict != model.VerdictContradicted {
+		t.Errorf("expected Verdict forced to Contradicted, got %s", sc.Verdict)
+	}
+	if !sc.HighRiskCaution {
+		t.Error("expected HighRiskCaution true")
+	}
+	if !sc.RecommendMedicalConsult {
+		t.Error("expected RecommendMedicalConsult true")
+	}
+	if sc.Severity < model.SeveritySerious {
+		t.Errorf("expected Severity >= Serious, got %s", sc.Severity)
+	}
+}
+
+// A1: the override beats a favorable judge verdict — the core "whatever
+// else is true" guarantee.
+func TestClaimService_CheckClaim_HighRiskOverrideBeatsFavorableJudgeVerdict(t *testing.T) {
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: "l'alcool augmente la fertilité"}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			return &data.JudgeVerdict{
+				Verdict:        model.VerdictSupported,
+				Reasoning:      "the judge's own full reasoning",
+				BriefReasoning: "the judge's own brief reasoning",
+				CitedEvidence:  []int{0},
+			}, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+	result, err := s.CheckClaim(
+		t.Context(),
+		&dto.CheckClaimDTO{Text: "l'alcool augmente la fertilité"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.SubClaims) != 1 {
+		t.Fatalf("expected 1 sub-claim, got %d", len(result.SubClaims))
+	}
+	assertHighRiskOverrideApplied(t, result.SubClaims[0])
+
+	wantCaution := highRiskCautionTemplates[model.LanguageFrench]
+	if !strings.Contains(result.FormattedMessage, wantCaution) {
+		t.Errorf(
+			"expected FormattedMessage to contain caution template, got %q",
+			result.FormattedMessage,
+		)
+	}
+	if strings.Contains(result.FormattedMessage, "the judge's own") {
+		t.Errorf(
+			"expected FormattedMessage to omit the judge's own reasoning, got %q",
+			result.FormattedMessage,
+		)
+	}
+}
+
+// A2: the override applies on the zero-evidence path too, where the judge
+// is never called.
+func TestClaimService_CheckClaim_HighRiskOverrideAppliesOnZeroEvidencePath(t *testing.T) {
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: "le tabac guérit l'acné"}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			t.Fatal("judge should never be called when retrieval returns no evidence")
+			return nil, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, newEmptyRAGService())
+
+	result, err := s.CheckClaim(t.Context(), &dto.CheckClaimDTO{Text: "le tabac guérit l'acné"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.SubClaims) != 1 {
+		t.Fatalf("expected 1 sub-claim, got %d", len(result.SubClaims))
+	}
+	assertHighRiskOverrideApplied(t, result.SubClaims[0])
+}
+
+// A3: the override applies cleanly even when the judge independently also
+// says Contradicted — no double-application weirdness.
+func TestClaimService_CheckClaim_HighRiskOverrideOnAlreadyContradictedVerdict(t *testing.T) {
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: "drinking alcohol increases fertility"}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			return &data.JudgeVerdict{
+				Verdict:       model.VerdictContradicted,
+				Severity:      model.SeverityEmergency,
+				Reasoning:     "the judge's own full reasoning",
+				CitedEvidence: []int{0},
+			}, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+	result, err := s.CheckClaim(
+		t.Context(),
+		&dto.CheckClaimDTO{Text: "drinking alcohol increases fertility"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sc := result.SubClaims[0]
+	assertHighRiskOverrideApplied(t, sc)
+	// The override must not downgrade a judge-assigned Severity that's
+	// already at/above Serious.
+	if sc.Severity != model.SeverityEmergency {
+		t.Errorf("expected Severity to stay Emergency, got %s", sc.Severity)
+	}
+	if strings.Count(
+		result.FormattedMessage,
+		highRiskCautionTemplates[model.LanguageFrench],
+	) != 1 {
+		t.Errorf(
+			"expected caution template to appear exactly once, got %q",
+			result.FormattedMessage,
+		)
+	}
+}
+
+// A4: the override fires from the analyzer's LLM-judged flag alone (an
+// unregulated-mixture-style claim, section 4 bullet 2), independent of the
+// keyword matcher — this exact text has no substance keyword in it.
+func TestClaimService_CheckClaim_HighRiskOverrideFromAnalyzerFlag_Mixture(t *testing.T) {
+	claim := "des bonbons fondus dans du lait chaud avec du miel guérissent les infections"
+	if isHighRiskSubstanceMention(claim) {
+		t.Fatalf("test setup invalid: claim unexpectedly matches the keyword list: %q", claim)
+	}
+
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: claim, HighRisk: true}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			return &data.JudgeVerdict{Verdict: model.VerdictSupported, CitedEvidence: []int{0}}, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+	result, err := s.CheckClaim(t.Context(), &dto.CheckClaimDTO{Text: claim})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertHighRiskOverrideApplied(t, result.SubClaims[0])
+}
+
+// A5: same as A4 but for a self-medication-style claim (section 4 bullet 4).
+func TestClaimService_CheckClaim_HighRiskOverrideFromAnalyzerFlag_SelfMedication(t *testing.T) {
+	claim := "prendre des antibiotiques sans ordonnance pour une infection vaginale"
+	if isHighRiskSubstanceMention(claim) {
+		t.Fatalf("test setup invalid: claim unexpectedly matches the keyword list: %q", claim)
+	}
+
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: claim, HighRisk: true}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			return &data.JudgeVerdict{Verdict: model.VerdictSupported, CitedEvidence: []int{0}}, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+	result, err := s.CheckClaim(t.Context(), &dto.CheckClaimDTO{Text: claim})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertHighRiskOverrideApplied(t, result.SubClaims[0])
+}
+
+// A6: bilingual keyword coverage end-to-end through CheckClaim, not just at
+// the isHighRiskSubstanceMention unit level.
+func TestClaimService_CheckClaim_HighRiskKeywordOverrideBilingual(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		claim string
+	}{
+		{"french", "l'alcool augmente la fertilité"},
+		{"english", "alcohol increases fertility"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			analyzer := &stubClaimAnalyzer{
+				analysis: &data.ClaimAnalysis{
+					InScope:   true,
+					SubClaims: []data.SubClaim{{Text: tt.claim}},
+				},
+			}
+			judge := &stubClaimJudge{
+				judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+					return &data.JudgeVerdict{
+						Verdict:       model.VerdictSupported,
+						CitedEvidence: []int{0},
+					}, nil
+				},
+			}
+			s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+			result, err := s.CheckClaim(t.Context(), &dto.CheckClaimDTO{Text: tt.claim})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			assertHighRiskOverrideApplied(t, result.SubClaims[0])
+		})
+	}
+}
+
+// A7: mixed sub-claims — only the flagged one is overridden, the rollup
+// still reports the high-risk category as top priority.
+func TestClaimService_CheckClaim_HighRiskOverridePartialAcrossSubClaims(t *testing.T) {
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope: true,
+			SubClaims: []data.SubClaim{
+				{Text: "claim A"},
+				{Text: "l'alcool augmente la fertilité"},
+			},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(req *data.JudgeRequest) (*data.JudgeVerdict, error) {
+			return &data.JudgeVerdict{Verdict: model.VerdictSupported, CitedEvidence: []int{0}}, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, ragServiceWithAnyHit())
+
+	result, err := s.CheckClaim(
+		t.Context(),
+		&dto.CheckClaimDTO{Text: "claim A and l'alcool augmente la fertilité"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.SubClaims) != 2 {
+		t.Fatalf("expected 2 sub-claims, got %d", len(result.SubClaims))
+	}
+	if result.SubClaims[0].Verdict != model.VerdictSupported ||
+		result.SubClaims[0].HighRiskCaution {
+		t.Errorf(
+			"expected sub-claim 0 to keep its own Supported verdict, got %+v",
+			result.SubClaims[0],
+		)
+	}
+	assertHighRiskOverrideApplied(t, result.SubClaims[1])
+	if overallVerdictKey(result.SubClaims) != overallKeyHighRisk {
+		t.Errorf(
+			"expected overall rollup to report high-risk as top priority, got %q",
+			overallVerdictKey(result.SubClaims),
+		)
+	}
+}
+
+// A8: regression guard for the resolved response-rule.txt contradiction —
+// an unvalidated food/herbal remedy claim (section 4 bullet 3) must NOT be
+// forced RED; it resolves to ordinary AMBER via the existing waterfall,
+// matching worked example 1 (carrot juice / lubrication).
+func TestClaimService_CheckClaim_UnvalidatedFoodRemedyClaimIsNotForcedRed(t *testing.T) {
+	claim := "Le jus de carotte améliore la lubrification vaginale"
+	if isHighRiskSubstanceMention(claim) {
+		t.Fatalf("test setup invalid: claim unexpectedly matches the keyword list: %q", claim)
+	}
+
+	analyzer := &stubClaimAnalyzer{
+		analysis: &data.ClaimAnalysis{
+			InScope:   true,
+			SubClaims: []data.SubClaim{{Text: claim, HighRisk: false}},
+		},
+	}
+	judge := &stubClaimJudge{
+		judgeFunc: func(*data.JudgeRequest) (*data.JudgeVerdict, error) {
+			t.Fatal("judge should never be called when retrieval returns no evidence")
+			return nil, nil
+		},
+	}
+	s := NewClaimService(analyzer, judge, newEmptyRAGService())
+
+	result, err := s.CheckClaim(t.Context(), &dto.CheckClaimDTO{Text: claim})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sc := result.SubClaims[0]
+	if sc.Verdict != model.VerdictInsufficientEvidence {
+		t.Errorf("expected InsufficientEvidence (AMBER), got %s", sc.Verdict)
+	}
+	if sc.HighRiskCaution {
+		t.Error("expected HighRiskCaution false for an unvalidated food/herbal remedy claim")
 	}
 }

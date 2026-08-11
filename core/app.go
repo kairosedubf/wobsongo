@@ -18,7 +18,7 @@ import (
 
 const (
 	ReadTimeout  = 5 * time.Second
-	WriteTimeout = 10 * time.Second
+	WriteTimeout = 90 * time.Second
 )
 
 type App struct {

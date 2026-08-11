@@ -21,7 +21,7 @@ type ClaimAnalysis struct {
 	// messy source phrasing (e.g. a video transcript sentence) into one or
 	// more crisp assertions a retrieval query can match well against. Empty
 	// when InScope is false.
-	SubClaims []string
+	SubClaims []SubClaim
 
 	// Language is the detected language of the original input message —
 	// threaded through to the judge (data.JudgeRequest.ResponseLanguage) and
@@ -29,6 +29,17 @@ type ClaimAnalysis struct {
 	// whatever language the user actually asked in, regardless of what
 	// language the retrieved evidence happens to be stored in.
 	Language model.Language
+}
+
+// SubClaim is one normalized, individually-checkable proposition produced by
+// decomposition, along with whether it falls under response-rule.txt
+// section 4's high-risk safety override (unregulated mixtures/potions, or
+// self-medication/anything that could delay proper care — tobacco/alcohol/
+// illicit drugs are instead caught deterministically by a keyword fail-safe,
+// see internal/service/high_risk_keywords.go, independent of this flag).
+type SubClaim struct {
+	Text     string
+	HighRisk bool
 }
 
 // ClaimAnalyzer scopes and decomposes a raw input message before retrieval:

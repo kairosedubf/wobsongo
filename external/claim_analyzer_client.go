@@ -61,10 +61,16 @@ func NewClaimAnalyzerClient(baseURL, model, apiKey string) *ClaimAnalyzerClient 
 
 // claimAnalysisJSON is the wire shape the LLM is instructed to respond with.
 type claimAnalysisJSON struct {
-	InScope       bool     `json:"in_scope"`
-	RefusalReason string   `json:"refusal_reason"`
-	SubClaims     []string `json:"sub_claims"`
-	Language      string   `json:"language"`
+	InScope       bool           `json:"in_scope"`
+	RefusalReason string         `json:"refusal_reason"`
+	SubClaims     []subClaimJSON `json:"sub_claims"`
+	Language      string         `json:"language"`
+}
+
+// subClaimJSON is one sub_claims entry's wire shape.
+type subClaimJSON struct {
+	Text     string `json:"text"`
+	HighRisk bool   `json:"high_risk"`
 }
 
 // Analyze implements data.ClaimAnalyzer.
@@ -131,9 +137,13 @@ func (c *ClaimAnalyzerClient) Analyze(
 		return nil, fmt.Errorf("failed to unmarshal claim analysis JSON: %w: %s", err, content)
 	}
 
-	subClaims := raw.SubClaims
-	if len(subClaims) > analyzerMaxSubClaims {
-		subClaims = subClaims[:analyzerMaxSubClaims]
+	rawSubClaims := raw.SubClaims
+	if len(rawSubClaims) > analyzerMaxSubClaims {
+		rawSubClaims = rawSubClaims[:analyzerMaxSubClaims]
+	}
+	subClaims := make([]data.SubClaim, len(rawSubClaims))
+	for i, sc := range rawSubClaims {
+		subClaims[i] = data.SubClaim{Text: sc.Text, HighRisk: sc.HighRisk}
 	}
 
 	language, err := model.ParseLanguage(raw.Language)
@@ -174,25 +184,45 @@ func buildAnalyzerPrompt(message string) string {
 	)
 	b.WriteString("compound claim (\"X treats Y and also prevents Z\") decomposes to multiple.\n")
 	b.WriteString(
-		"3. What language is the input message written in — exactly one of \"en\" or \"fr\".\n\n",
+		"3. What language is the input message written in — exactly one of \"en\" or \"fr\".\n",
 	)
+	b.WriteString(
+		"4. For each sub-claim, does it promote or ask about: tobacco, alcohol, or a ",
+	)
+	b.WriteString(
+		"recreational or illicit drug; an unregulated homemade mixture or potion to ingest or ",
+	)
+	b.WriteString(
+		"apply; or self-medication (e.g. antibiotics or hormones without a prescription) or ",
+	)
+	b.WriteString(
+		"anything else that could delay proper medical care? Set high_risk to true if so — this ",
+	)
+	b.WriteString(
+		"never depends on whether the claim turns out to be true or false, only on the subject ",
+	)
+	b.WriteString("matter itself.\n\n")
 	b.WriteString(
 		"Respond with ONLY a JSON object (no markdown, no commentary), with this shape:\n",
 	)
 	b.WriteString(
-		`{"in_scope": true/false, "refusal_reason": "...", "sub_claims": ["..."], "language": "en"}` + "\n\n",
+		`{"in_scope": true/false, "refusal_reason": "...", ` +
+			`"sub_claims": [{"text": "...", "high_risk": true/false}], "language": "en"}` + "\n\n",
 	)
 	b.WriteString("refusal_reason is only used when in_scope is false (briefly explain why); ")
 	b.WriteString(
 		"otherwise use \"\". sub_claims is only used when in_scope is true; otherwise use [].\n",
 	)
 	b.WriteString(
-		"Write sub_claims and refusal_reason in the SAME language you detected the input ",
+		"Always write each sub-claim's text and refusal_reason in French, regardless of what ",
 	)
 	b.WriteString(
-		"message to be written in (the \"language\" field) — never translate them, even if ",
+		"language you detected the input message to be written in (the \"language\" field is for ",
 	)
-	b.WriteString("you expect the knowledge base evidence to be in a different language.\n\n")
+	b.WriteString(
+		"detection only) — the system currently only replies in French, even if you expect the ",
+	)
+	b.WriteString("knowledge base evidence to be in a different language.\n\n")
 	b.WriteString("Message:\n\"\"\"\n")
 	b.WriteString(message)
 	b.WriteString("\n\"\"\"\n")

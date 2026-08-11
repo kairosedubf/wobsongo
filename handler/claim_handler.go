@@ -87,6 +87,7 @@ func toClaimCheckResponse(result *service.ClaimCheckResult) dto.ClaimCheckRespon
 			Verdict:                 sc.Verdict.String(),
 			Severity:                sc.Severity.String(),
 			RecommendMedicalConsult: sc.RecommendMedicalConsult,
+			HighRiskCaution:         sc.HighRiskCaution,
 			Reasoning:               sc.Reasoning,
 			BriefReasoning:          sc.BriefReasoning,
 			Citations:               citations,

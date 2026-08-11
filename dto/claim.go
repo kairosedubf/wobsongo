@@ -58,6 +58,13 @@ type SubClaimResponse struct {
 	// access to reliable information, it does not replace one.
 	RecommendMedicalConsult bool `json:"recommend_medical_consult"`
 
+	// HighRiskCaution is true when the forced-RED safety override fired
+	// (response-rule.txt section 4: tobacco/alcohol/illicit drugs, an
+	// unregulated homemade mixture, or self-medication) — Verdict is forced
+	// to "contradicted" whenever this is true, regardless of what the
+	// evidence otherwise showed.
+	HighRiskCaution bool `json:"high_risk_caution"`
+
 	// Reasoning is the judge's explanation for the verdict.
 	Reasoning string `json:"reasoning"`
 

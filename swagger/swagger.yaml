@@ -1,6 +1,15 @@
 definitions:
   dto.CheckClaimDTO:
     properties:
+      is_long:
+        description: |-
+          IsLong controls FormattedMessage's verbosity: false (the default —
+          note the zero-value already means short, no need to set this at all
+          for the common case) shows a brief paraphrased explainer per
+          sub-claim; true shows the full reasoning plus its evidence/citations.
+          Only affects FormattedMessage — SubClaims/Citations are always fully
+          populated in the structured response either way.
+        type: boolean
       text:
         description: |-
           Text is the claim or message to check — may be a direct question, a
@@ -11,6 +20,12 @@ definitions:
     type: object
   dto.CitationResponse:
     properties:
+      chunk_id:
+        description: |-
+          ChunkID is the chunk this evidence traces back to — combine with
+          DocumentID to link directly to this evidence (e.g. the standalone
+          /evidence PDF viewer: /evidence?document_id=...&chunk_id=...).
+        type: string
       document_id:
         description: DocumentID is the source document this evidence came from.
         type: string
@@ -137,6 +152,11 @@ definitions:
     type: object
   dto.SubClaimResponse:
     properties:
+      brief_reasoning:
+        description: |-
+          BriefReasoning is a short, self-contained paraphrase of Reasoning,
+          safe to display without the citations list alongside it.
+        type: string
       citations:
         description: |-
           Citations are the specific pieces of knowledge-base evidence the
@@ -147,6 +167,14 @@ definitions:
       claim:
         description: Claim is the normalized sub-claim text that was actually checked.
         type: string
+      high_risk_caution:
+        description: |-
+          HighRiskCaution is true when the forced-RED safety override fired
+          (response-rule.txt section 4: tobacco/alcohol/illicit drugs, an
+          unregulated homemade mixture, or self-medication) — Verdict is forced
+          to "contradicted" whenever this is true, regardless of what the
+          evidence otherwise showed.
+        type: boolean
       reasoning:
         description: Reasoning is the judge's explanation for the verdict.
         type: string

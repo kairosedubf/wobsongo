@@ -44,7 +44,15 @@ type SubClaimResult struct {
 	Verdict                 model.Verdict
 	Severity                model.Severity
 	RecommendMedicalConsult bool
-	Reasoning               string
+	// HighRiskCaution is response-rule.txt section 4's forced-RED safety
+	// override — set whenever the sub-claim promotes or asks about tobacco/
+	// alcohol/illicit drugs, an unregulated homemade mixture, or self-
+	// medication, regardless of what the evidence/judge concluded (see
+	// applyHighRiskOverride). When true, Verdict is forced to Contradicted
+	// and formatClaimMessage shows a fixed caution message instead of
+	// Reasoning/BriefReasoning.
+	HighRiskCaution bool
+	Reasoning       string
 	// BriefReasoning is a short, self-contained paraphrase of Reasoning,
 	// safe to show without the evidence list — see formatClaimMessage's
 	// short mode. Empty whenever Verdict is InsufficientEvidence (the
@@ -117,9 +125,18 @@ func (s *ClaimService) CheckClaim(
 	subClaims := analysis.SubClaims
 	if len(subClaims) == 0 {
 		// The analyzer said in-scope but produced no decomposition — check
-		// the original message directly rather than returning nothing.
-		subClaims = []string{message}
+		// the original message directly rather than returning nothing. No
+		// analyzer HighRisk flag is available here, so the keyword fail-safe
+		// (applied below, per sub-claim) is the only signal for this case.
+		subClaims = []data.SubClaim{{Text: message}}
 	}
+
+	// replyLanguage is hardcoded to French regardless of analysis.Language
+	// (the detected input language) — WobSongo_Response_Logic_Heuristics_v2.md
+	// §5/§9: all user-facing bot output must be French, no exceptions.
+	// analysis.Language is kept on ClaimCheckResult below as detected-language
+	// metadata only; it no longer selects reply text/templates.
+	const replyLanguage = model.LanguageFrench
 
 	results := make([]SubClaimResult, len(subClaims))
 	// errgroup.WithContext, not a plain group: this is a synchronous,
@@ -128,9 +145,10 @@ func (s *ClaimService) CheckClaim(
 	// caller can retry, unlike the background document-ingestion workers
 	// where one chunk's failure shouldn't cancel its siblings.
 	g, gctx := errgroup.WithContext(ctx)
-	for i, claim := range subClaims {
+	for i, sc := range subClaims {
+		highRisk := sc.HighRisk || isHighRiskSubstanceMention(sc.Text)
 		g.Go(func() error {
-			result, err := s.checkSubClaim(gctx, claim, analysis.Language)
+			result, err := s.checkSubClaim(gctx, sc.Text, replyLanguage, highRisk)
 			if err != nil {
 				return err
 			}
@@ -142,14 +160,14 @@ func (s *ClaimService) CheckClaim(
 		return nil, fmt.Errorf("failed to check sub-claims: %w", err)
 	}
 
-	overallSummary := summarizeVerdicts(results, analysis.Language)
+	overallSummary := summarizeVerdicts(results, replyLanguage)
 	return &ClaimCheckResult{
 		InScope:        true,
 		OverallSummary: overallSummary,
 		FormattedMessage: formatClaimMessage(
 			results,
 			overallSummary,
-			analysis.Language,
+			replyLanguage,
 			req.IsLong,
 		),
 		SubClaims: results,
@@ -161,10 +179,17 @@ func (s *ClaimService) CheckClaim(
 // sub-claim with no retrieved evidence never reaches the judge — there's
 // nothing to cite, so InsufficientEvidence is returned directly rather than
 // spending an LLM call to reach the same conclusion.
+//
+// highRisk applies response-rule.txt section 4's safety override after
+// evidence/judgment is otherwise computed — retrieval and judging still run
+// normally so Reasoning/BriefReasoning/Citations stay real for internal
+// traceability, but the returned result's Verdict/Severity/
+// RecommendMedicalConsult are forced regardless of what the judge concluded.
 func (s *ClaimService) checkSubClaim(
 	ctx context.Context,
 	claim string,
 	language model.Language,
+	highRisk bool,
 ) (*SubClaimResult, error) {
 	hits, err := s.rag.Search(ctx, claim, claimSearchLimit)
 	if err != nil {
@@ -172,10 +197,14 @@ func (s *ClaimService) checkSubClaim(
 	}
 
 	if len(hits) == 0 {
-		return &SubClaimResult{
+		result := &SubClaimResult{
 			Claim:   claim,
 			Verdict: model.VerdictInsufficientEvidence,
-		}, nil
+		}
+		if highRisk {
+			applyHighRiskOverride(result)
+		}
+		return result, nil
 	}
 
 	evidence := make([]data.JudgeEvidence, len(hits))
@@ -218,7 +247,7 @@ func (s *ClaimService) checkSubClaim(
 		}
 	}
 
-	return &SubClaimResult{
+	result := &SubClaimResult{
 		Claim:                   claim,
 		Verdict:                 verdict.Verdict,
 		Severity:                verdict.Severity,
@@ -226,12 +255,31 @@ func (s *ClaimService) checkSubClaim(
 		Reasoning:               verdict.Reasoning,
 		BriefReasoning:          verdict.BriefReasoning,
 		Citations:               citations,
-	}, nil
+	}
+	if highRisk {
+		applyHighRiskOverride(result)
+	}
+	return result, nil
+}
+
+// applyHighRiskOverride forces result to the RED bucket per response-rule.txt
+// section 4 — "do not endorse it, whatever else is true" — regardless of
+// what the judge (or the zero-evidence short-circuit) concluded. Reasoning/
+// BriefReasoning/Citations are left untouched for internal traceability;
+// formatClaimMessage substitutes the fixed caution message for display.
+func applyHighRiskOverride(result *SubClaimResult) {
+	result.Verdict = model.VerdictContradicted
+	result.HighRiskCaution = true
+	result.RecommendMedicalConsult = true
+	if result.Severity < model.SeveritySerious {
+		result.Severity = model.SeveritySerious
+	}
 }
 
 // Overall rollup categories produced by overallVerdictKey — shared between
 // overallSummaryTemplates and overallEmoji so both stay keyed consistently.
 const (
+	overallKeyHighRisk     = "high_risk"
 	overallKeyContradicted = "contradicted"
 	overallKeySupported    = "supported"
 	overallKeyInsufficient = "insufficient"
@@ -244,6 +292,10 @@ const (
 // LLM call, since this is a deterministic rollup of already-computed
 // verdicts, not something that needs its own model call.
 var overallSummaryTemplates = map[string]map[model.Language]string{
+	overallKeyHighRisk: {
+		model.LanguageEnglish: "involves a high-risk product or practice",
+		model.LanguageFrench:  "implique un produit ou une pratique à risque",
+	},
 	overallKeyContradicted: {
 		model.LanguageEnglish: "contains inaccuracies",
 		model.LanguageFrench:  "contient des inexactitudes",
@@ -267,11 +319,15 @@ var overallSummaryTemplates = map[string]map[model.Language]string{
 // summarizeVerdicts and formatClaimMessage can share the same
 // classification without deriving it twice.
 func overallVerdictKey(results []SubClaimResult) string {
+	anyHighRisk := false
 	anyContradicted := false
 	anyInsufficient := false
 	allSupported := true
 
 	for _, r := range results {
+		if r.HighRiskCaution {
+			anyHighRisk = true
+		}
 		switch r.Verdict {
 		case model.VerdictContradicted, model.VerdictMixed:
 			anyContradicted = true
@@ -288,6 +344,10 @@ func overallVerdictKey(results []SubClaimResult) string {
 	}
 
 	switch {
+	case anyHighRisk:
+		// Rule 1 (safety override) outranks rule 2 (myth/contradicted) in
+		// response-rule.txt's decision order — checked first.
+		return overallKeyHighRisk
 	case anyContradicted:
 		return overallKeyContradicted
 	case allSupported:
@@ -309,6 +369,7 @@ func summarizeVerdicts(results []SubClaimResult, language model.Language) string
 // overallEmoji is the color-coding shown alongside the overall rollup in a
 // FormattedMessage, keyed the same way as overallSummaryTemplates.
 var overallEmoji = map[string]string{
+	overallKeyHighRisk:     "🚫",
 	overallKeySupported:    "✅",
 	overallKeyContradicted: "❌",
 	overallKeyInsufficient: "❓",
@@ -320,6 +381,26 @@ var overallEmoji = map[string]string{
 var claimsCheckedLabelTemplates = map[model.Language]struct{ one, many string }{
 	model.LanguageEnglish: {one: "claim checked", many: "claims checked"},
 	model.LanguageFrench:  {one: "affirmation vérifiée", many: "affirmations vérifiées"},
+}
+
+// insufficientEvidenceExplainerTemplates is shown in place of
+// BriefReasoning/Reasoning whenever a sub-claim's verdict is
+// VerdictInsufficientEvidence — deterministic rather than LLM-authored,
+// since the zero-hits short-circuit in checkSubClaim never calls the judge
+// (leaving Reasoning/BriefReasoning empty) and the judge's own freeform text
+// for this case (external/judge_client.go) has no fixed wording.
+var insufficientEvidenceExplainerTemplates = map[model.Language]string{
+	model.LanguageEnglish: "This information isn't confirmed by our validated health sources. When in doubt, talk to a health professional.",
+	model.LanguageFrench:  "Cette information n'est pas confirmée par nos sources de santé. Dans le doute, va au centre de santé.",
+}
+
+// highRiskCautionTemplates is shown in place of BriefReasoning/Reasoning
+// whenever a sub-claim's HighRiskCaution is set (response-rule.txt section
+// 4) — fixed rather than LLM-authored, since this is a strong precaution
+// that must read the same regardless of what evidence was or wasn't found.
+var highRiskCautionTemplates = map[model.Language]string{
+	model.LanguageEnglish: "Warning: this product or practice hasn't been validated and may pose risks to your health. Please consult a health professional.",
+	model.LanguageFrench:  "Attention : ce produit ou cette pratique n'est pas validé(e) et peut présenter des risques pour ta santé. Va au centre de santé.",
 }
 
 // formatClaimMessage renders results and overallSummary into a human-facing,
@@ -364,12 +445,18 @@ func formatClaimMessage(
 		if isLong {
 			explainer = r.Reasoning
 		}
+		switch {
+		case r.HighRiskCaution:
+			explainer = highRiskCautionTemplates[language]
+		case r.Verdict == model.VerdictInsufficientEvidence:
+			explainer = insufficientEvidenceExplainerTemplates[language]
+		}
 		if explainer != "" {
 			b.WriteString("\n")
 			b.WriteString(explainer)
 		}
 
-		if isLong && len(r.Citations) > 0 {
+		if isLong && !r.HighRiskCaution && len(r.Citations) > 0 {
 			b.WriteString("\n")
 			for _, c := range r.Citations {
 				fmt.Fprintf(&b, "  [%d] (%s) %s\n", c.Index, c.Source, truncateForMessage(c.Text))

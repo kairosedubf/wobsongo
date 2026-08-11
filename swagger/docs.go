@@ -891,6 +891,10 @@ const docTemplate = `{
                 "text"
             ],
             "properties": {
+                "is_long": {
+                    "description": "IsLong controls FormattedMessage's verbosity: false (the default —\nnote the zero-value already means short, no need to set this at all\nfor the common case) shows a brief paraphrased explainer per\nsub-claim; true shows the full reasoning plus its evidence/citations.\nOnly affects FormattedMessage — SubClaims/Citations are always fully\npopulated in the structured response either way.",
+                    "type": "boolean"
+                },
                 "text": {
                     "description": "Text is the claim or message to check — may be a direct question, a\ncasual claim, or a sentence pulled from a video transcript.",
                     "type": "string"
@@ -900,6 +904,10 @@ const docTemplate = `{
         "dto.CitationResponse": {
             "type": "object",
             "properties": {
+                "chunk_id": {
+                    "description": "ChunkID is the chunk this evidence traces back to — combine with\nDocumentID to link directly to this evidence (e.g. the standalone\n/evidence PDF viewer: /evidence?document_id=...\u0026chunk_id=...).",
+                    "type": "string"
+                },
                 "document_id": {
                     "description": "DocumentID is the source document this evidence came from.",
                     "type": "string"
@@ -1049,6 +1057,10 @@ const docTemplate = `{
         "dto.SubClaimResponse": {
             "type": "object",
             "properties": {
+                "brief_reasoning": {
+                    "description": "BriefReasoning is a short, self-contained paraphrase of Reasoning,\nsafe to display without the citations list alongside it.",
+                    "type": "string"
+                },
                 "citations": {
                     "description": "Citations are the specific pieces of knowledge-base evidence the\nverdict is based on. Empty whenever Verdict is insufficient_evidence.",
                     "type": "array",
@@ -1059,6 +1071,10 @@ const docTemplate = `{
                 "claim": {
                     "description": "Claim is the normalized sub-claim text that was actually checked.",
                     "type": "string"
+                },
+                "high_risk_caution": {
+                    "description": "HighRiskCaution is true when the forced-RED safety override fired\n(response-rule.txt section 4: tobacco/alcohol/illicit drugs, an\nunregulated homemade mixture, or self-medication) — Verdict is forced\nto \"contradicted\" whenever this is true, regardless of what the\nevidence otherwise showed.",
+                    "type": "boolean"
                 },
                 "reasoning": {
                     "description": "Reasoning is the judge's explanation for the verdict.",

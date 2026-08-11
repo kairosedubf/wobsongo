@@ -55,7 +55,11 @@ func TestJudgeClient_Judge_Success(t *testing.T) {
 		t.Errorf("expected CitedEvidence [0], got %v", verdict.CitedEvidence)
 	}
 	if verdict.BriefReasoning != "vitamin C helps a bit" {
-		t.Errorf("expected BriefReasoning %q, got %q", "vitamin C helps a bit", verdict.BriefReasoning)
+		t.Errorf(
+			"expected BriefReasoning %q, got %q",
+			"vitamin C helps a bit",
+			verdict.BriefReasoning,
+		)
 	}
 }
 
