@@ -1,5 +1,81 @@
 name: "wobsongocore"
 services:
+  # Runs `wobsongo migrateup` once and exits. `migrateup` normally prompts
+  # for an interactive "yes" confirmation outside of APP_ENV=testing, which
+  # would hang forever with no tty attached — `echo yes |` feeds it the
+  # confirmation non-interactively. `app` waits for this to exit 0 before
+  # starting, since it errors out (and keeps restarting) against a schema
+  # that hasn't been migrated yet.
+  migrate:
+    image: ghcr.io/kairosedubf/wobsongo:sha-8edf7dc
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      netwobsongocore:
+    entrypoint: ["sh", "-c"]
+    command: ["echo yes | wobsongo migrateup"]
+    environment:
+      APP_ENV: production
+      APP_DB_URI: postgres://wobsongocore:LocalDev123@postgres:5432/wobsongocore_db?sslmode=disable
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+  app:
+    image: ghcr.io/kairosedubf/wobsongo:sha-8edf7dc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      netwobsongocore:
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-1}
+      APP_PORT: 8000
+      APP_DB_URI: postgres://wobsongocore:LocalDev123@postgres:5432/wobsongocore_db?sslmode=disable
+      APP_JWT_SECRET: ${APP_JWT_SECRET}
+      APP_JWT_EXPIRY_HOURS: ${APP_JWT_EXPIRY_HOURS:-24}
+      API_HOST: ${API_HOST}
+      FRONTEND_HOST: ${FRONTEND_HOST}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      EMAIL_PROVIDER_TRANSACTIONAL: ${EMAIL_PROVIDER_TRANSACTIONAL:-smtp}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Wobsongo}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET: ${S3_SECRET}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      S3_USE_SSL: ${S3_USE_SSL:-false}
+      VLM_BASE_URL: ${VLM_BASE_URL}
+      VLM_MODEL: ${VLM_MODEL}
+      VLM_API_KEY: ${VLM_API_KEY}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      EXTRACTION_BASE_URL: ${EXTRACTION_BASE_URL}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL}
+      EXTRACTION_API_KEY: ${EXTRACTION_API_KEY}
+      EXTRACTION_CONCURRENCY: ${EXTRACTION_CONCURRENCY:-5}
+      TRANSLATION_BASE_URL: ${TRANSLATION_BASE_URL}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL}
+      TRANSLATION_API_KEY: ${TRANSLATION_API_KEY}
+      TRANSLATION_CONCURRENCY: ${TRANSLATION_CONCURRENCY:-5}
+      CLAIM_CHECK_BASE_URL: ${CLAIM_CHECK_BASE_URL}
+      CLAIM_CHECK_MODEL: ${CLAIM_CHECK_MODEL}
+      CLAIM_CHECK_API_KEY: ${CLAIM_CHECK_API_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      SENTRY_DSN: ${SENTRY_DSN}
   postgres:
     # pgvector/pgvector ships the same postgres:18 base plus the pgvector
     # extension pre-installed (document_chunks.embedding needs `CREATE

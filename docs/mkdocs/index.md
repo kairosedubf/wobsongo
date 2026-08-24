@@ -29,7 +29,7 @@ Distributed under the Apache 2.0 License. See `LICENSE` for more information.
 
 ## Important Links
 
-- [GitHub Repository](https://github.com/ImpactScope-organization/wobsongo)
+- [GitHub Repository](https://github.com/kairosedubf/wobsongo)
 
 ## Local Development
 
@@ -52,7 +52,7 @@ By running `devbox shell`, it will automatically download and set up the require
 1.  **Clone the repository**:
 
     ```bash
-    git clone git@github.com:ImpactScope-organization/wobsongo.git
+    git clone git@github.com:kairosedubf/wobsongo.git
     cd wobsongo
     ```
 

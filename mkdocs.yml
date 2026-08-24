@@ -1,6 +1,6 @@
 site_name: Wobsongo Documentation
 site_description: Automated Claim Verification Framework for DPGs
-site_url: https://github.com/ImpactScope-organization/wobsongo
+site_url: https://kairosedubf.github.io/wobsongo/
 docs_dir: docs/mkdocs
 watch:
   - docs/mkdocs
@@ -46,10 +46,39 @@ nav:
       - Overview: index.md
       - Quick Reference: quick-reference.md
 
+  - Guide:
+      - Overview: guide/overview.md
+      - Quickstart: guide/quickstart.md
+      - Concepts: guide/concepts.md
+      - Web UI: guide/web-ui.md
+      - Use Cases: guide/use-cases.md
+
+  - API Reference:
+      - Overview: api/overview.md
+      - Authentication: api/authentication.md
+      - OpenAPI Spec: api/openapi.md
+      - Documents: api/documents.md
+      - Media: api/media.md
+      - Claims: api/claims.md
+      - Errors: api/errors.md
+      - Rate Limits: api/rate-limits.md
+
+  - Developer Guide:
+      - Local Setup: developer/local-setup.md
+      - Project Structure: developer/project-structure.md
+      - Dev Tooling: developer/dev-tooling.md
+      - Background Jobs: developer/background-jobs.md
+      - External Integrations: developer/external-integrations.md
+      - Database: developer/database.md
+      - Testing: developer/testing.md
+      - Patterns & Conventions: developer/patterns-and-conventions.md
+      - Extending: developer/extending.md
+      - Auth & Security: developer/auth-and-security.md
+
   - Architecture:
       - Overview: architecture.md
       - Decisions (ADR):
-          - "ADR 0001: Layered Architecture": ../adr/0001-layered-architecture.md
+          - "ADR 0001: Layered Architecture": adr/0001-layered-architecture.md
 
   - Governance:
       - Project Charter: governance/PROJECT_CHARTER.md
