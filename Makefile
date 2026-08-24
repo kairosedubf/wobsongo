@@ -3,7 +3,7 @@ setup:
 	@go install github.com/riverqueue/river/cmd/river@v0.30.2
 check:
 	@go mod tidy
-	# @go tool swag init -q --output ./swagger --generalInfo ./internal/core/app.go
+	@go tool swag init -q --output ./swagger --generalInfo ./core/app.go
 	@go build -o ./tmp/out . && find tmp -name '*out' -print0 | xargs -0 ls -lhS
 	@golangci-lint run ./...
 	@go tool sqlc diff

@@ -56,23 +56,23 @@ nav:
   - API Reference:
       - Overview: api/overview.md
       - Authentication: api/authentication.md
-      - OpenAPI Spec: api/openapi.md
-      - Documents: api/documents.md
       - Media: api/media.md
+      - Documents: api/documents.md
       - Claims: api/claims.md
       - Errors: api/errors.md
       - Rate Limits: api/rate-limits.md
+      - OpenAPI Spec: api/openapi.md
 
   - Developer Guide:
       - Local Setup: developer/local-setup.md
       - Project Structure: developer/project-structure.md
       - Dev Tooling: developer/dev-tooling.md
+      - Patterns & Conventions: developer/patterns-and-conventions.md
+      - Extending: developer/extending.md
       - Background Jobs: developer/background-jobs.md
       - External Integrations: developer/external-integrations.md
       - Database: developer/database.md
       - Testing: developer/testing.md
-      - Patterns & Conventions: developer/patterns-and-conventions.md
-      - Extending: developer/extending.md
       - Auth & Security: developer/auth-and-security.md
 
   - Architecture:

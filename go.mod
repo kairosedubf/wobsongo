@@ -29,6 +29,7 @@ require (
 	github.com/pgvector/pgvector-go/pgx v0.4.0
 	github.com/riverqueue/river v0.39.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.39.0
+	github.com/riverqueue/river/rivertype v0.39.0
 	github.com/spf13/cobra v1.10.2
 	github.com/swaggo/swag v1.16.6
 	github.com/templui/templui v1.12.1
@@ -184,7 +185,6 @@ require (
 	github.com/riverqueue/river/riverdriver v0.39.0 // indirect
 	github.com/riverqueue/river/riverdriver/riversqlite v0.39.0 // indirect
 	github.com/riverqueue/river/rivershared v0.39.0 // indirect
-	github.com/riverqueue/river/rivertype v0.39.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/riza-io/grpc-go v0.2.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
