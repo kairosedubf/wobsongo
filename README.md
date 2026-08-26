@@ -1,6 +1,6 @@
 # wobsongo
 
-[![codecov](https://codecov.io/gh/kairosedubf/wobsongo/branch/main/graph/badge.svg)](https://codecov.io/gh/kairosedubf/wobsongo)
+[![[![coverage](https://github.com/kairosedubf/wobsongo/actions/workflows/coverage.yml/badge.svg)](https://github.com/kairosedubf/wobsongo/actions/workflows/coverage.yml)docs](https://github.com/kairosedubf/wobsongo/actions/workflows/docs.yml/badge.svg)](https://github.com/kairosedubf/wobsongo/actions/workflows/docs.yml)[![codecov](https://codecov.io/gh/kairosedubf/wobsongo/branch/main/graph/badge.svg)](https://codecov.io/gh/kairosedubf/wobsongo)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://kairosedubf.github.io/wobsongo/)
 
