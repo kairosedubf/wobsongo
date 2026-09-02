@@ -69,6 +69,7 @@ type DocumentChunk struct {
 	KnowledgeExtractedAt pgtype.Timestamptz
 	Language             int32
 	TextTranslated       pgtype.Text
+	TableMarkdown        string
 	TextFtsEn            interface{}
 	TextFtsFr            interface{}
 }

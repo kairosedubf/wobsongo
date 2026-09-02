@@ -146,7 +146,9 @@ templ Form(data FormPageData) {
 														>
 															{ fmt.Sprintf("[%d] %s", cite.Index, cite.Source) }
 														</a>
-														if cite.Text != "" {
+									if cite.TableMarkdown != "" {
+										<pre class="mt-1 whitespace-pre-wrap font-mono">{ cite.TableMarkdown }</pre>
+									} else if cite.Text != "" {
 															<span>{ " — " + cite.Text }</span>
 														}
 													</li>

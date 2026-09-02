@@ -59,6 +59,9 @@ type RAGResult struct {
 	// claim judge) the surrounding context a bare SPO fact doesn't carry on
 	// its own. Empty for chunk-source hits, which already ARE the chunk.
 	ChunkText string
+	// TableMarkdown is the complete Markdown representation for table-backed
+	// hits, kept separate from the text used for retrieval and judging.
+	TableMarkdown string
 	// ChunkID is the chunk this hit traces back to — the hit's own ID for
 	// chunk-source results, or the parent chunk's ID for fact-source results
 	// (see hydrateFactChunks). Lets a caller (e.g. a claim check's citations)
@@ -182,6 +185,7 @@ func (s *RAGService) hydrateFactChunks(ctx context.Context, results []RAGResult)
 			return fmt.Errorf("failed to fetch parent chunk %s: %w", results[i].ChunkID, err)
 		}
 		results[i].ChunkText = chunk.Text
+		results[i].TableMarkdown = chunk.TableMarkdown
 		results[i].Page = chunk.Page
 		results[i].BoundingBox = chunk.BoundingBox
 		results[i].LayoutType = chunk.LayoutType
@@ -202,6 +206,7 @@ func mapChunkResults(
 			Methods:        []string{method},
 			DocumentID:     r.Item.DocumentID,
 			Text:           r.Item.Text,
+			TableMarkdown:  r.Item.TableMarkdown,
 			Page:           r.Item.Page,
 			Language:       r.Item.Language,
 			BoundingBox:    r.Item.BoundingBox,

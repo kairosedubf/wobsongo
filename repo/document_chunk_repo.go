@@ -342,11 +342,12 @@ func toModelDocumentChunk(d *db.DocumentChunk) *model.DocumentChunk {
 		Language:             model.Language(d.Language),
 		TextTranslated:       fromPgText(d.TextTranslated),
 		ParsedChunk: model.ParsedChunk{
-			Text:        d.Text,
-			Page:        int(d.Page),
-			LayoutType:  model.LayoutType(d.LayoutType),
-			BoundingBox: toBoundingBox(d.BoundingBox),
-			AssetURL:    d.AssetUrl,
+			Text:          d.Text,
+			TableMarkdown: d.TableMarkdown,
+			Page:          int(d.Page),
+			LayoutType:    model.LayoutType(d.LayoutType),
+			BoundingBox:   toBoundingBox(d.BoundingBox),
+			AssetURL:      d.AssetUrl,
 		},
 	}
 }
@@ -406,6 +407,7 @@ func toCreateDocumentChunksBatchParams(c *model.DocumentChunk) db.CreateDocument
 		Topics:          c.Topics,
 		FactualityScore: c.FactualityScore,
 		Text:            c.Text,
+		TableMarkdown:   c.TableMarkdown,
 		Page:            toInt32(c.Page),
 		Chapter:         c.Chapter,
 		LayoutType:      string(c.LayoutType),

@@ -11,6 +11,8 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,10 +115,114 @@ type doclingTextItem struct {
 }
 
 type doclingTableItem struct {
-	Label string        `json:"label"`
-	Prov  []doclingProv `json:"prov"`
-	// Table cell/grid data (Data field) intentionally not mapped yet —
-	// out of scope until a future sub-task needs structured table content.
+	Label string           `json:"label"`
+	Prov  []doclingProv    `json:"prov"`
+	Data  doclingTableData `json:"data"`
+}
+
+type doclingTableData struct {
+	TableCells []doclingTableCell `json:"table_cells"`
+}
+
+type doclingTableCell struct {
+	Text              string `json:"text"`
+	StartRowOffsetIdx int    `json:"start_row_offset_idx"`
+	StartColOffsetIdx int    `json:"start_col_offset_idx"`
+}
+
+func tableToText(table doclingTableItem) string {
+	rows := make(map[int][]doclingTableCell)
+	for _, cell := range table.Data.TableCells {
+		rows[cell.StartRowOffsetIdx] = append(rows[cell.StartRowOffsetIdx], cell)
+	}
+	rowIndexes := make([]int, 0, len(rows))
+	for row := range rows {
+		rowIndexes = append(rowIndexes, row)
+	}
+	sort.Ints(rowIndexes)
+
+	var b strings.Builder
+	b.WriteString("Table:")
+	if len(rowIndexes) == 0 {
+		return b.String()
+	}
+
+	headers := make(map[int]string)
+	for _, cell := range rows[rowIndexes[0]] {
+		headers[cell.StartColOffsetIdx] = strings.TrimSpace(cell.Text)
+	}
+
+	for rowPosition, rowIndex := range rowIndexes[1:] {
+		cells := rows[rowIndex]
+		sort.SliceStable(cells, func(i, j int) bool {
+			return cells[i].StartColOffsetIdx < cells[j].StartColOffsetIdx
+		})
+		b.WriteString("\n\n- Row ")
+		b.WriteString(strconv.Itoa(rowPosition + 2))
+		b.WriteString(": ")
+		for i, cell := range cells {
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			header := headers[cell.StartColOffsetIdx]
+			if header != "" {
+				b.WriteString(header)
+				b.WriteString(": ")
+			}
+			b.WriteString(strings.TrimSpace(cell.Text))
+		}
+	}
+
+	return b.String()
+}
+
+func tableToMarkdown(table doclingTableItem) string {
+	rows := make(map[int][]doclingTableCell)
+	maxColumn := 0
+	for _, cell := range table.Data.TableCells {
+		rows[cell.StartRowOffsetIdx] = append(rows[cell.StartRowOffsetIdx], cell)
+		maxColumn = max(maxColumn, cell.StartColOffsetIdx)
+	}
+	rowIndexes := make([]int, 0, len(rows))
+	for row := range rows {
+		rowIndexes = append(rowIndexes, row)
+	}
+	sort.Ints(rowIndexes)
+	if len(rowIndexes) == 0 {
+		return ""
+	}
+
+	columns := maxColumn + 1
+	var b strings.Builder
+	writeRow := func(rowIndex int) {
+		cells := make(map[int]string)
+		for _, cell := range rows[rowIndex] {
+			cells[cell.StartColOffsetIdx] = strings.TrimSpace(cell.Text)
+		}
+		b.WriteString("| ")
+		for column := 0; column < columns; column++ {
+			if column > 0 {
+				b.WriteString(" | ")
+			}
+			value := strings.ReplaceAll(cells[column], "|", "\\|")
+			b.WriteString(strings.ReplaceAll(value, "\n", " "))
+		}
+		b.WriteString(" |\n")
+	}
+
+	writeRow(rowIndexes[0])
+	b.WriteString("| ")
+	for column := 0; column < columns; column++ {
+		if column > 0 {
+			b.WriteString(" | ")
+		}
+		b.WriteString("---")
+	}
+	b.WriteString(" |\n")
+	for _, rowIndex := range rowIndexes[1:] {
+		writeRow(rowIndex)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 type doclingPictureItem struct {
@@ -303,9 +409,11 @@ func mapDoclingDocument(doc *doclingDocument) *data.ProcessedDocument {
 		page, bbox := firstProv(t.Prov)
 		maxPage = max(maxPage, page)
 		chunks = append(chunks, model.ParsedChunk{
-			Page:        page,
-			LayoutType:  model.LayoutType(t.Label),
-			BoundingBox: bbox,
+			Text:          tableToText(t),
+			TableMarkdown: tableToMarkdown(t),
+			Page:          page,
+			LayoutType:    model.LayoutType(t.Label),
+			BoundingBox:   bbox,
 		})
 	}
 

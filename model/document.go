@@ -279,6 +279,10 @@ type ParsedChunk struct {
 	// Text is the actual text content of the chunk.
 	Text string `json:"text" binding:"required"`
 
+	// TableMarkdown is the complete Markdown representation of a table. Text
+	// remains the descriptive representation used by retrieval and judging.
+	TableMarkdown string `json:"table_markdown,omitempty"`
+
 	// Page is the page number in the document where this chunk was found.
 	Page int `json:"page" binding:"required"`
 

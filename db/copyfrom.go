@@ -91,6 +91,7 @@ func (r iteratorForCreateDocumentChunksBatch) Values() ([]interface{}, error) {
 		r.rows[0].AssetUrl,
 		r.rows[0].Language,
 		r.rows[0].TextTranslated,
+		r.rows[0].TableMarkdown,
 	}, nil
 }
 
@@ -99,5 +100,5 @@ func (r iteratorForCreateDocumentChunksBatch) Err() error {
 }
 
 func (q *Queries) CreateDocumentChunksBatch(ctx context.Context, arg []CreateDocumentChunksBatchParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"document_chunks"}, []string{"id", "created_at", "updated_at", "document_id", "sequence_number", "topics", "factuality_score", "text", "page", "chapter", "layout_type", "bounding_box", "asset_url", "language", "text_translated"}, &iteratorForCreateDocumentChunksBatch{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"document_chunks"}, []string{"id", "created_at", "updated_at", "document_id", "sequence_number", "topics", "factuality_score", "text", "page", "chapter", "layout_type", "bounding_box", "asset_url", "language", "text_translated", "table_markdown"}, &iteratorForCreateDocumentChunksBatch{rows: arg})
 }

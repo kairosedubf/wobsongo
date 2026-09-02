@@ -19,6 +19,9 @@ type JudgeEvidence struct {
 	// ChunkText is the source chunk's full text, for a fact hit — empty for
 	// a chunk hit, which already IS the chunk.
 	ChunkText string
+	// TableMarkdown is carried through for citation display; the judge uses
+	// Text and ChunkText, which retain the search-oriented representation.
+	TableMarkdown string
 	// TruthTier is set for fact hits only (empty for chunk hits), mirroring
 	// service.RAGResult.TruthTier — carried as the display string directly,
 	// not re-parsed into model.TruthTier, since chunk hits have no truth

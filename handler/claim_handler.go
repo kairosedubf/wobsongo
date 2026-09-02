@@ -80,6 +80,7 @@ func toClaimCheckResponse(result *service.ClaimCheckResult) dto.ClaimCheckRespon
 				DocumentID: cit.DocumentID,
 				ChunkID:    cit.ChunkID,
 				Text:       cit.Text,
+				TableMarkdown: cit.TableMarkdown,
 			}
 		}
 		resp.SubClaims[i] = dto.SubClaimResponse{

@@ -26,7 +26,8 @@ type Citation struct {
 	Index      int
 	Source     string
 	Text       string
-	ChunkText  string
+	ChunkText     string
+	TableMarkdown string
 	TruthTier  string
 	DocumentID uuid.UUID
 	// ChunkID is the chunk this citation traces back to, mirroring
@@ -185,6 +186,7 @@ func (s *ClaimService) checkSubClaim(
 			Source:     h.Source,
 			Text:       h.Text,
 			ChunkText:  h.ChunkText,
+			TableMarkdown: h.TableMarkdown,
 			TruthTier:  h.TruthTier,
 			DocumentID: h.DocumentID,
 			ChunkID:    h.ChunkID,
@@ -210,6 +212,7 @@ func (s *ClaimService) checkSubClaim(
 				Source:     e.Source,
 				Text:       e.Text,
 				ChunkText:  e.ChunkText,
+				TableMarkdown: e.TableMarkdown,
 				TruthTier:  e.TruthTier,
 				DocumentID: e.DocumentID,
 				ChunkID:    e.ChunkID,

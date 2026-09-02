@@ -89,4 +89,8 @@ type CitationResponse struct {
 
 	// Text is the matched text — a chunk's text, or a fact's subject-predicate-object.
 	Text string `json:"text"`
+
+	// TableMarkdown is present for table-backed citations and is intended for
+	// display; Text remains the matched text used by retrieval/judging.
+	TableMarkdown string `json:"table_markdown,omitempty"`
 }
