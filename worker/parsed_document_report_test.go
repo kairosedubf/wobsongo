@@ -17,6 +17,9 @@ var reportFixture = flag.String("fixture", "parsed_document.json", "JSON fixture
 // Run explicitly with:
 // go test ./worker -run '^TestGenerateParsedDocumentReport$' -count=1 -v
 func TestGenerateParsedDocumentReport(t *testing.T) {
+	if os.Getenv("GENERATE_REPORT") == "" {
+		t.Skip("set GENERATE_REPORT=1 to run — writes worker/testdata/parsed_document_report.html")
+	}
 	raw, err := os.ReadFile(filepath.Join("testdata", *reportFixture))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -26,58 +29,21 @@ func TestGenerateParsedDocumentReport(t *testing.T) {
 		t.Fatalf("parse fixture: %v", err)
 	}
 
-	kept, dropped := filterNoiseChunks(parsed.Chunks)
-	rows := make([]reportRow, 0, len(parsed.Chunks))
-	keptIndex := 0
-	for i := 0; i < len(parsed.Chunks); i++ {
-		chunk := parsed.Chunks[i]
-		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
-			strings.TrimSpace(chunk.Text) != "" &&
-			i+1 < len(parsed.Chunks) &&
-			parsed.Chunks[i+1].LayoutType == model.LayoutTypeListItem {
-			for i+1 < len(parsed.Chunks) && parsed.Chunks[i+1].LayoutType == model.LayoutTypeListItem {
-				item := parsed.Chunks[i+1]
-				rows = append(rows, reportRow{
-					Index: i, Page: item.Page, LayoutType: string(item.LayoutType),
-					Text: chunk.Text + "\n" + item.Text, BoundingBox: item.BoundingBox,
-					KeptIndex: keptIndex, Status: "MERGE", StatusClass: "merge",
-				})
-				keptIndex++
-				i++
-			}
-			continue
-		}
-		row := reportRow{
-			Index:       i,
-			Page:        chunk.Page,
-			LayoutType:  string(chunk.LayoutType),
-			Text:        chunk.Text,
-			BoundingBox: chunk.BoundingBox,
-		}
-		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
-			strings.TrimSpace(chunk.Text) != "" &&
-			i+1 < len(parsed.Chunks) &&
-			parsed.Chunks[i+1].LayoutType == model.LayoutTypeText &&
-			strings.TrimSpace(parsed.Chunks[i+1].Text) != "" {
-			paragraph := parsed.Chunks[i+1]
-			row.Page = paragraph.Page
-			row.LayoutType = string(paragraph.LayoutType)
-			row.Text = chunk.Text + "\n" + paragraph.Text
-			row.BoundingBox = paragraph.BoundingBox
-			row.Status, row.StatusClass, row.KeptIndex = "MERGE", "merge", keptIndex
-			keptIndex++
-			i++
-		} else if noiseLayoutTypes[chunk.LayoutType] {
-			row.Status, row.StatusClass, row.Reason = "DROP", "drop", "layout type is configured as noise"
-		} else if emptyTextNoiseLayoutTypes[chunk.LayoutType] && strings.TrimSpace(chunk.Text) == "" {
-			row.Status, row.StatusClass, row.Reason = "DROP", "drop", "text is empty for a text layout"
-		} else if chunk.LayoutType == model.LayoutTypeSectionHeader && len(strings.Fields(chunk.Text)) <= shortSectionHeaderMaxWords {
-			row.Status, row.StatusClass, row.Reason = "DROP", "drop", "standalone section header has at most three words"
-		} else {
-			row.Status, row.StatusClass, row.KeptIndex = "KEEP", "keep", keptIndex
-			keptIndex++
-		}
-		rows = append(rows, row)
+	kept, dropped, decisions := filterNoiseChunksDetailed(parsed.Chunks)
+	rows := make([]reportRow, 0, len(decisions))
+	for _, decision := range decisions {
+		statusClass := strings.ToLower(decision.Status)
+		rows = append(rows, reportRow{
+			Index:       decision.OriginalIndex,
+			KeptIndex:   decision.KeptIndex,
+			Page:        decision.Chunk.Page,
+			LayoutType:  string(decision.Chunk.LayoutType),
+			Text:        decision.Chunk.Text,
+			BoundingBox: decision.Chunk.BoundingBox,
+			Status:      decision.Status,
+			StatusClass: statusClass,
+			Reason:      decision.Reason,
+		})
 	}
 
 	file, err := os.Create(filepath.Join("testdata", "parsed_document_report.html"))

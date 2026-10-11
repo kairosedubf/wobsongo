@@ -288,18 +288,55 @@ func (w *ProcessParsedDocumentWorker) uploadImage(
 // (page headers/footers, table of contents), returning the kept chunks and
 // a count of how many were dropped.
 func filterNoiseChunks(chunks []model.ParsedChunk) (kept []model.ParsedChunk, dropped int) {
+	kept, dropped, _ = filterNoiseChunksDetailed(chunks)
+	return kept, dropped
+}
+
+type noiseChunkDecision struct {
+	OriginalIndex int
+	Chunk         model.ParsedChunk
+	KeptIndex     int
+	Status        string
+	Reason        string
+}
+
+func mergeSectionHeader(header, chunk model.ParsedChunk) model.ParsedChunk {
+	chunk.Text = header.Text + "\n" + chunk.Text
+	return chunk
+}
+
+func filterNoiseChunksDetailed(
+	chunks []model.ParsedChunk,
+) (kept []model.ParsedChunk, dropped int, decisions []noiseChunkDecision) {
+	keptIndex := 0
 	for i := 0; i < len(chunks); i++ {
 		chunk := chunks[i]
 		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
 			strings.TrimSpace(chunk.Text) != "" &&
 			i+1 < len(chunks) &&
 			chunks[i+1].LayoutType == model.LayoutTypeListItem {
-			headerText := chunk.Text
 			for i+1 < len(chunks) && chunks[i+1].LayoutType == model.LayoutTypeListItem {
-				merged := chunks[i+1]
-				merged.Text = headerText + "\n" + merged.Text
-				kept = append(kept, merged)
 				i++
+				item := chunks[i]
+				if strings.TrimSpace(item.Text) == "" {
+					dropped++
+					decisions = append(decisions, noiseChunkDecision{
+						OriginalIndex: i,
+						Chunk:         item,
+						Status:        "DROP",
+						Reason:        "list item text is empty",
+					})
+					continue
+				}
+				merged := mergeSectionHeader(chunk, item)
+				kept = append(kept, merged)
+				decisions = append(decisions, noiseChunkDecision{
+					OriginalIndex: i,
+					Chunk:         merged,
+					KeptIndex:     keptIndex,
+					Status:        "MERGE",
+				})
+				keptIndex++
 			}
 			continue
 		}
@@ -308,26 +345,57 @@ func filterNoiseChunks(chunks []model.ParsedChunk) (kept []model.ParsedChunk, dr
 			i+1 < len(chunks) &&
 			chunks[i+1].LayoutType == model.LayoutTypeText &&
 			strings.TrimSpace(chunks[i+1].Text) != "" {
-			merged := chunks[i+1]
-			merged.Text = chunk.Text + "\n" + merged.Text
+			merged := mergeSectionHeader(chunk, chunks[i+1])
 			kept = append(kept, merged)
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i + 1,
+				Chunk:         merged,
+				KeptIndex:     keptIndex,
+				Status:        "MERGE",
+			})
+			keptIndex++
 			i++
 			continue
 		}
 		if noiseLayoutTypes[chunk.LayoutType] {
 			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "layout type is configured as noise",
+			})
 			continue
 		}
 		if emptyTextNoiseLayoutTypes[chunk.LayoutType] && strings.TrimSpace(chunk.Text) == "" {
 			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "text is empty for a text layout",
+			})
 			continue
 		}
 		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
 			len(strings.Fields(chunk.Text)) <= shortSectionHeaderMaxWords {
 			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "standalone section header has at most three words",
+			})
 			continue
 		}
 		kept = append(kept, chunk)
+		decisions = append(decisions, noiseChunkDecision{
+			OriginalIndex: i,
+			Chunk:         chunk,
+			KeptIndex:     keptIndex,
+			Status:        "KEEP",
+		})
+		keptIndex++
 	}
-	return kept, dropped
+	return kept, dropped, decisions
 }

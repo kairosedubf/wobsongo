@@ -101,20 +101,20 @@ func TestFilterNoiseChunks_MergesSectionHeaderWithConsecutiveListItems(t *testin
 	paragraph := model.ParsedChunk{Text: "Additional notes", LayoutType: model.LayoutTypeParagraph}
 
 	kept, dropped := filterNoiseChunks([]model.ParsedChunk{header, first, empty, second, paragraph})
-	if dropped != 0 {
-		t.Fatalf("expected 0 dropped chunks, got %d", dropped)
+	if dropped != 1 {
+		t.Fatalf("expected 1 dropped chunk, got %d", dropped)
 	}
-	if len(kept) != 4 {
-		t.Fatalf("expected 4 kept chunks, got %d", len(kept))
+	if len(kept) != 3 {
+		t.Fatalf("expected 3 kept chunks, got %d", len(kept))
 	}
-	if kept[0].Text != "Recommendations\nUse treatment A" || kept[1].Text != "Recommendations\n" || kept[2].Text != "Recommendations\nAvoid treatment B" {
-		t.Errorf("unexpected merged list items: %+v", kept[:3])
+	if kept[0].Text != "Recommendations\nUse treatment A" || kept[1].Text != "Recommendations\nAvoid treatment B" {
+		t.Errorf("unexpected merged list items: %+v", kept[:2])
 	}
 	if kept[0].Page != first.Page || kept[0].BoundingBox != first.BoundingBox {
 		t.Errorf("expected first item metadata to be preserved: %+v", kept[0])
 	}
-	if kept[3].Text != paragraph.Text {
-		t.Errorf("expected paragraph after list to remain unchanged: %+v", kept[3])
+	if kept[2].Text != paragraph.Text {
+		t.Errorf("expected paragraph after list to remain unchanged: %+v", kept[2])
 	}
 }
 
