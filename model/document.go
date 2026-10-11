@@ -192,6 +192,7 @@ const (
 	LayoutTypeTitle         LayoutType = "title"
 	LayoutTypeSectionHeader LayoutType = "section_header"
 	LayoutTypeParagraph     LayoutType = "paragraph"
+	LayoutTypeText          LayoutType = "text"
 	LayoutTypeListItem      LayoutType = "list_item"
 	LayoutTypeCode          LayoutType = "code"
 	LayoutTypeCaption       LayoutType = "caption"

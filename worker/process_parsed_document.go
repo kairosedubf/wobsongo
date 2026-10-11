@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,19 @@ var noiseLayoutTypes = map[model.LayoutType]bool{
 	model.LayoutTypeDocumentIndex: true,
 }
 
+const shortSectionHeaderMaxWords = 3
+
+var emptyTextNoiseLayoutTypes = map[model.LayoutType]bool{
+	model.LayoutTypeParagraph:     true,
+	model.LayoutTypeText:          true,
+	model.LayoutTypeTitle:         true,
+	model.LayoutTypeSectionHeader: true,
+	model.LayoutTypeListItem:      true,
+	model.LayoutTypeCaption:       true,
+	model.LayoutTypeFootnote:      true,
+	model.LayoutTypeReference:     true,
+}
+
 // contentTypeImageJPEG is shared between imageContentTypeExtensions and
 // caption_image_chunks.go's extensionContentTypes to avoid duplicating the
 // "image/jpeg" literal.
@@ -48,16 +62,16 @@ var imageContentTypeExtensions = map[string]string{
 }
 
 // ProcessParsedDocumentWorker is a River worker that turns a document's raw
-// Docling output (fetched and stored by ParseDocumentWorker) into stored
+// Docling output (fetched && stored by ParseDocumentWorker) into stored
 // chunks: it never calls Docling itself, so it can be retried freely
 // without re-paying for that external call.
 type ProcessParsedDocumentWorker struct {
 	// Embedding River's default worker behavior for the specific DTO.
 	river.WorkerDefaults[queue.ProcessParsedDocumentDTO]
-	// RawStore reads the raw Docling response back from S3, and stores any
+	// RawStore reads the raw Docling response back from S3, && stores any
 	// images extracted from it.
 	RawStore data.RawObjectStore
-	// DocumentService backfills the document's page count and (if blank)
+	// DocumentService backfills the document's page count && (if blank)
 	// title once Docling has actually parsed it.
 	DocumentService *service.DocumentService
 	// ChunkRepo stores the chunks that survive filtering.
@@ -170,7 +184,7 @@ func (w *ProcessParsedDocumentWorker) Work(
 				// Topics must be a non-nil empty slice, not the zero value: the
 				// batch insert below goes through Postgres's COPY protocol
 				// (sqlc :copyfrom), which sends every column's literal value —
-				// a nil slice encodes as SQL NULL over COPY and violates
+				// a nil slice encodes as SQL NULL over COPY && violates
 				// topics' NOT NULL constraint, since COPY never falls back to
 				// a column's DEFAULT the way a plain INSERT would.
 				Topics:      []string{},
@@ -203,7 +217,7 @@ func (w *ProcessParsedDocumentWorker) Work(
 			}
 		} else {
 			// No images to caption, so every stored chunk's text is already
-			// final — embed and extract knowledge now rather than waiting on
+			// final — embed && extract knowledge now rather than waiting on
 			// a captioning job that will never run. If there were images,
 			// CaptionImageChunksWorker enqueues both jobs itself once
 			// captioning finishes.
@@ -274,12 +288,114 @@ func (w *ProcessParsedDocumentWorker) uploadImage(
 // (page headers/footers, table of contents), returning the kept chunks and
 // a count of how many were dropped.
 func filterNoiseChunks(chunks []model.ParsedChunk) (kept []model.ParsedChunk, dropped int) {
-	for i := range chunks {
-		if noiseLayoutTypes[chunks[i].LayoutType] {
-			dropped++
+	kept, dropped, _ = filterNoiseChunksDetailed(chunks)
+	return kept, dropped
+}
+
+type noiseChunkDecision struct {
+	OriginalIndex int
+	Chunk         model.ParsedChunk
+	KeptIndex     int
+	Status        string
+	Reason        string
+}
+
+func mergeSectionHeader(header, chunk model.ParsedChunk) model.ParsedChunk {
+	chunk.Text = header.Text + "\n" + chunk.Text
+	return chunk
+}
+
+func filterNoiseChunksDetailed(
+	chunks []model.ParsedChunk,
+) (kept []model.ParsedChunk, dropped int, decisions []noiseChunkDecision) {
+	keptIndex := 0
+	for i := 0; i < len(chunks); i++ {
+		chunk := chunks[i]
+		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
+			strings.TrimSpace(chunk.Text) != "" &&
+			i+1 < len(chunks) &&
+			chunks[i+1].LayoutType == model.LayoutTypeListItem {
+			for i+1 < len(chunks) && chunks[i+1].LayoutType == model.LayoutTypeListItem {
+				i++
+				item := chunks[i]
+				if strings.TrimSpace(item.Text) == "" {
+					dropped++
+					decisions = append(decisions, noiseChunkDecision{
+						OriginalIndex: i,
+						Chunk:         item,
+						Status:        "DROP",
+						Reason:        "list item text is empty",
+					})
+					continue
+				}
+				merged := mergeSectionHeader(chunk, item)
+				kept = append(kept, merged)
+				decisions = append(decisions, noiseChunkDecision{
+					OriginalIndex: i,
+					Chunk:         merged,
+					KeptIndex:     keptIndex,
+					Status:        "MERGE",
+				})
+				keptIndex++
+			}
 			continue
 		}
-		kept = append(kept, chunks[i])
+		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
+			strings.TrimSpace(chunk.Text) != "" &&
+			i+1 < len(chunks) &&
+			chunks[i+1].LayoutType == model.LayoutTypeText &&
+			strings.TrimSpace(chunks[i+1].Text) != "" {
+			merged := mergeSectionHeader(chunk, chunks[i+1])
+			kept = append(kept, merged)
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i + 1,
+				Chunk:         merged,
+				KeptIndex:     keptIndex,
+				Status:        "MERGE",
+			})
+			keptIndex++
+			i++
+			continue
+		}
+		if noiseLayoutTypes[chunk.LayoutType] {
+			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "layout type is configured as noise",
+			})
+			continue
+		}
+		if emptyTextNoiseLayoutTypes[chunk.LayoutType] && strings.TrimSpace(chunk.Text) == "" {
+			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "text is empty for a text layout",
+			})
+			continue
+		}
+		if chunk.LayoutType == model.LayoutTypeSectionHeader &&
+			len(strings.Fields(chunk.Text)) <= shortSectionHeaderMaxWords {
+			dropped++
+			decisions = append(decisions, noiseChunkDecision{
+				OriginalIndex: i,
+				Chunk:         chunk,
+				Status:        "DROP",
+				Reason:        "standalone section header has at most three words",
+			})
+			continue
+		}
+		kept = append(kept, chunk)
+		decisions = append(decisions, noiseChunkDecision{
+			OriginalIndex: i,
+			Chunk:         chunk,
+			KeptIndex:     keptIndex,
+			Status:        "KEEP",
+		})
+		keptIndex++
 	}
-	return kept, dropped
+	return kept, dropped, decisions
 }
